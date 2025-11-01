@@ -13,11 +13,11 @@ public class FileServer {
     private int port;
     public FileServer(int port, String fileSystemName, int totalSize){
         // Initialize the FileSystemManager
-        FileSystemManager fsManager = new FileSystemManager(fileSystemName,
-                10*128 );
+        FileSystemManager fsManager = new FileSystemManager(fileSystemName, 10*128 );
         this.fsManager = fsManager;
         this.port = port;
     }
+
 
     public void start(){
         try (ServerSocket serverSocket = new ServerSocket(12345)) {
@@ -42,6 +42,24 @@ public class FileServer {
                                 writer.println("SUCCESS: File '" + parts[1] + "' created.");
                                 writer.flush();
                                 break;
+                            case "READ":
+                                String contents = fsManager.readFile(parts[1]);
+                                writer.println("INFO: File '" + contents + "' read.");
+                                writer.flush();
+                                break;
+                            case "LIST":
+                                fsManager.listFile();
+                                writer.println("SUCCESS: Listed all files.");
+                                break;
+
+                            case "DELETE":
+                                fsManager.deleteFile(parts[1]);
+                                writer.println("SUCCESS: File '" + parts[1] + "' is deleted.");
+                                writer.flush();
+                                break;
+                            case "WRITE":
+                                
+                                
                             //TODO: Implement other commands READ, WRITE, DELETE, LIST
                             case "QUIT":
                                 writer.println("SUCCESS: Disconnecting.");
