@@ -14,22 +14,15 @@ public class FileSystemManager {
     private final RandomAccessFile disk;
     private final ReentrantLock globalLock = new ReentrantLock();
     private final FEntry[] inodeTable;
-    private final boolean[] blockUsed;
-    private final int[] blockNext;
+    private final boolean[] freeBlockList;
 
     public FileSystemManager(String filename, int totalSize) {
         try {
             disk = new RandomAccessFile(filename, "rw");
-            int minSize = BLOCK_SIZE * MAXBLOCKS;
-            if (totalSize < minSize) totalSize = minSize;
             if (disk.length() < totalSize) disk.setLength(totalSize);
             inodeTable = new FEntry[MAXFILES];
-            blockUsed = new boolean[MAXBLOCKS];
-            blockNext = new int[MAXBLOCKS];
-            for (int i = 0; i < MAXBLOCKS; i++) {
-                blockUsed[i] = false;
-                blockNext[i] = -1;
-            }
+            freeBlockList = new boolean[MAXBLOCKS];
+            for (int i = 0; i < MAXBLOCKS; i++) freeBlockList[i] = true;
             System.out.println("The file system has been initialized: " + filename);
         } catch (IOException e) {
             throw new RuntimeException("Error: the file system failed to initialize", e);
@@ -52,34 +45,14 @@ public class FileSystemManager {
         return -1;
     }
 
-    private int countFreeBlocks() {
-        int c = 0;
-        for (boolean used : blockUsed) if (!used) c++;
-        return c;
-    }
-
     private int allocateBlock() throws Exception {
         for (int i = 0; i < MAXBLOCKS; i++) {
-            if (!blockUsed[i]) {
-                blockUsed[i] = true;
-                blockNext[i] = -1;
+            if (freeBlockList[i]) {
+                freeBlockList[i] = false;
                 return i;
             }
         }
         throw new Exception("No free disk block available.");
-    }
-
-    private void freeBlockChain(int startBlock) throws IOException {
-        int current = startBlock;
-        while (current != -1) {
-            int next = blockNext[current];
-            blockUsed[current] = false;
-            blockNext[current] = -1;
-            long offset = (long) current * BLOCK_SIZE;
-            disk.seek(offset);
-            disk.write(new byte[BLOCK_SIZE]);
-            current = next;
-        }
     }
 
     public void createFile(String fileName) throws Exception {
@@ -97,9 +70,10 @@ public class FileSystemManager {
                 }
             }
             if (inodeIndex == -1) throw new Exception("No free inode available.");
-            FEntry newFile = new FEntry(fileName, (short) 0, (short) -1);
+            int blockIndex = allocateBlock();
+            FEntry newFile = new FEntry(fileName, (short) 0, (short) blockIndex);
             inodeTable[inodeIndex] = newFile;
-            System.out.println("File created: " + fileName);
+            System.out.println("File created: " + fileName + " (block " + blockIndex + ")");
         } finally {
             globalLock.unlock();
         }
@@ -111,48 +85,14 @@ public class FileSystemManager {
             FEntry file = findFile(fileName);
             if (file == null) throw new Exception("File not found.");
             byte[] bytes = data.getBytes();
-            int requiredBlocks = (bytes.length + BLOCK_SIZE - 1) / BLOCK_SIZE;
-            if (requiredBlocks == 0) requiredBlocks = 1;
-            int free = countFreeBlocks();
-            int oldHead = file.getFirstBlock();
-            if (oldHead != -1) {
-                int count = 0;
-                int cur = oldHead;
-                while (cur != -1) {
-                    count++;
-                    cur = blockNext[cur];
-                }
-                free += count;
-            }
-            if (requiredBlocks > free) throw new Exception("Not enough space for file.");
-            if (oldHead != -1) freeBlockChain(oldHead);
-            int head = -1;
-            int prev = -1;
-            for (int i = 0; i < requiredBlocks; i++) {
-                int b = allocateBlock();
-                if (head == -1) head = b;
-                if (prev != -1) blockNext[prev] = b;
-                prev = b;
-            }
-            file.setFirstBlock((short) head);
+            if (bytes.length > BLOCK_SIZE)
+                throw new Exception("File too large for a single block (" + bytes.length + " bytes).");
+            int blockIndex = file.getFirstBlock();
+            long offset = (long) blockIndex * BLOCK_SIZE;
+            disk.seek(offset);
+            disk.write(bytes);
+            if (bytes.length < BLOCK_SIZE) disk.write(new byte[BLOCK_SIZE - bytes.length]);
             file.setFilesize((short) bytes.length);
-            int remaining = bytes.length;
-            int offsetInData = 0;
-            int current = head;
-            while (current != -1) {
-                long offset = (long) current * BLOCK_SIZE;
-                disk.seek(offset);
-                int toWrite = Math.min(remaining, BLOCK_SIZE);
-                if (toWrite > 0) {
-                    disk.write(bytes, offsetInData, toWrite);
-                    if (toWrite < BLOCK_SIZE) disk.write(new byte[BLOCK_SIZE - toWrite]);
-                } else {
-                    disk.write(new byte[BLOCK_SIZE]);
-                }
-                remaining -= toWrite;
-                offsetInData += toWrite;
-                current = blockNext[current];
-            }
             System.out.println("You wrote " + bytes.length + " bytes in the file: " + fileName);
         } finally {
             globalLock.unlock();
@@ -166,23 +106,18 @@ public class FileSystemManager {
             if (file == null) throw new Exception("File not found.");
             int size = file.getFilesize();
             if (size <= 0) return "";
-            int head = file.getFirstBlock();
-            if (head == -1) return "";
+            int blockIndex = file.getFirstBlock();
+            long offset = (long) blockIndex * BLOCK_SIZE;
+            disk.seek(offset);
             byte[] buffer = new byte[size];
-            int remaining = size;
-            int offsetInData = 0;
-            int current = head;
-            while (current != -1 && remaining > 0) {
-                long offset = (long) current * BLOCK_SIZE;
-                disk.seek(offset);
-                int toRead = Math.min(remaining, BLOCK_SIZE);
-                int read = disk.read(buffer, offsetInData, toRead);
-                if (read <= 0) break;
-                remaining -= read;
-                offsetInData += read;
-                current = blockNext[current];
+            int read = disk.read(buffer);
+            if (read <= 0) return "";
+            if (read < size) {
+                byte[] tmp = new byte[read];
+                System.arraycopy(buffer, 0, tmp, 0, read);
+                buffer = tmp;
             }
-            return new String(buffer, 0, size - remaining);
+            return new String(buffer);
         } finally {
             globalLock.unlock();
         }
@@ -194,8 +129,12 @@ public class FileSystemManager {
             int inodeIndex = findInodeIndex(fileName);
             if (inodeIndex == -1) throw new Exception("File not found.");
             FEntry file = inodeTable[inodeIndex];
-            int head = file.getFirstBlock();
-            if (head != -1) freeBlockChain(head);
+            int blockIndex = file.getFirstBlock();
+            if (blockIndex >= 0 && blockIndex < MAXBLOCKS)
+                freeBlockList[blockIndex] = true;
+            long offset = (long) blockIndex * BLOCK_SIZE;
+            disk.seek(offset);
+            disk.write(new byte[BLOCK_SIZE]);
             inodeTable[inodeIndex] = null;
             System.out.println("File deleted: " + fileName);
         } finally {
@@ -218,7 +157,6 @@ public class FileSystemManager {
                         .append(" (").append(entry.getFilesize()).append(" bytes)\n");
             }
         }
-        if (sb.length() == 0) sb.append("No files on disk.\n");
         return sb.toString();
     }
 }

@@ -5,5 +5,14 @@
       <module name="FileClient" target="19" />
       <module name="FileServer" target="19" />
     </bytecodeTargetLevel>
+    <annotationProcessing>
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="FileClient" />
+        <module name="FileServer" />
+      </profile>
+    </annotationProcessing>
   </component>
 </project>
