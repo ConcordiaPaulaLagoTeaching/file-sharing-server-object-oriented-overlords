@@ -29,10 +29,6 @@ public class ClientHandler implements Runnable {
                 String command = input.readLine();
                 if (command == null) break;
                 String[] parts = command.trim().split(" ", 3);
-                if (parts.length == 0 || parts[0].isEmpty()) {
-                    output.println("Error: empty command");
-                    continue;
-                }
                 String cmd = parts[0].toUpperCase();
                 try {
                     switch (cmd) {
