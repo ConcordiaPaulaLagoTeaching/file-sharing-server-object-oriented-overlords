@@ -58,6 +58,9 @@ public class FileSystemManager {
     public void createFile(String fileName) throws Exception {
         globalLock.lock();
         try {
+            if (fileName.length() > 11) {
+                throw new Exception("Filename must be 11 characters or less as per assignment instructions.");
+            }
             if (findFile(fileName) != null) throw new Exception("File already exists.");
             int inodeIndex = -1;
             for (int i = 0; i < MAXFILES; i++) {
