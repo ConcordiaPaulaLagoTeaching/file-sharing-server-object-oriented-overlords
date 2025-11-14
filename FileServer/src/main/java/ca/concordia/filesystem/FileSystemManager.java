@@ -86,7 +86,7 @@ public class FileSystemManager {
         globalLock.lock();
         try {
             if (fileName.length() > 11) {
-                throw new Exception("Filename must be at most 11 characters.");
+                throw new Exception("Filename must be 11 characters or less.");
             }
             if (findFile(fileName) != null) throw new Exception("File already exists.");
             int inodeIndex = -1;
